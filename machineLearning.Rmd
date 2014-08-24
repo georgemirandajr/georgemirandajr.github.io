@@ -1,0 +1,139 @@
+---
+title: "Machine Learning Assignment"
+author: "George Miranda"
+date: "Saturday, August 23, 2014"
+output: html_document
+---
+
+The goal of this project is to predict the manner in which someone performed an exercise. This is the "classe" variable in the training set. This report describes how the model was built, how cross validation was used, and the expected out of sample error. The eventual model was used to predict 20 different test cases with a 100% success rate. 
+
+The analysis and model building were performed with several R packages. Those packages were:
+
+```{r packages, eval=FALSE, warning = FALSE}
+library(caret)
+library(dplyr)
+library(psych)
+library(doParallel)
+```
+
+## Load and Tidy the Data
+
+The data are available from the links below:
+
+Training data: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+Testing data: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+Once downloaded to a local directory, the data was loaded into R for analysis.
+
+```{r eval=FALSE}
+training <- read.csv("./machineLearning/training.csv", header = TRUE)
+
+testing <- read.csv("./machineLearning/testing.csv", header = TRUE)
+```
+
+The training data contained 160 variables and 19,622 observations. It was very unlikely that all 160 variables would be included in the final model; therefore, I made an attempt to clean up the data set with only the most meaningful predictors. The first method used was to identify which variables had near zero variability. Variables that remain steady throughout the data set provide no insight into how they affect the outcome variable, classe. The second method involved looking for the variables that were without null or NA values. Any variables that had several NULL or NA values were eliminated from the model.
+
+_It should be noted that the testing data will only be used as the final test for submission of the assignment. Later in this paper a testing set is used to validate the model_
+
+# Near Zero Method
+```{r nearZero, eval=FALSE}
+## create a new dataframe that contains a vector "nzv" with TRUE or FALSE values.
+nz <- nearZeroVar(training, saveMetrics = TRUE)
+
+## create a new variable in the dataframe that will be used to refer to the column number of the testing data.
+nz$variable <- 1:160
+
+## filter to keep only those where "nzv" is FALSE. There were 100 remaining after the filter.
+
+nz <- filter(nz, nzv == FALSE)
+
+## select the columns of the training data that correspond to the remaining 100 in the nz dataframe. The first two variables have been excluded as well because they are simply an index vector and user name vector.
+
+training <- select(training, 3:5, 7:11, 18:19, 21:22, 24:25, 27:50, 60:68, 76:77, 80, 83:86, 93:94, 96:97, 99:100, 102:124, 132, 135, 138, 140:141, 151:160)
+```
+
+I was able to eliminate 62 variables from the data that would have no impact on the model. This step will save me time when building the model.
+
+## Seek and Remove Invalid Variables
+
+The variables containing many NA and NULL values are considered invalid for purposes of this analysis. They were removed using the following code:
+
+```{r Remove NA and NULL, eval=FALSE}
+# create a dataframe using the psych pacakge to identify some summary statistics of the training data.
+a <- describe(training)
+
+# the 'n' vector in this new summary dataframe 'a' showed me which variables contain all 19,622 observations and which ones had only 406.
+
+a <- filter(a, n == 19622)
+
+# select the columns of the training data that correspond to the remaining 57 observations in the 'a' dataframe. 
+
+training <- select(training, 1:8, 25:37, 39:47, 52:54, 61, 72:83, 87, 89:98)
+```
+
+The final data set that will be used for building a model contains 57 variables. 
+
+## Build The Model
+
+Prior to building the model, the data was partitioned with 60% going to training and the remaining to a new testing variable called "val1". This is generally accepted as a decent proportion of the data for model training purposes.
+
+```{r partition, eval=FALSE}
+# create an index variable
+inTrain <- createDataPartition(y = training$classe, p = 0.60, list = FALSE)
+
+# subset the data into two using the index
+training <- training[inTrain,]
+
+# create a new testing set from the training data called 'val1' 
+val1 <- training[-inTrain,]
+```
+
+At this point, the model was created using all 57 remaining variables. I selected C50 as the method in my model because it seemed to be an appropriate classification package given that my outcome variable has discrete values. I used simple cross validation because it seemed simple, yet powerful enough to get the job done. The number of times the model was cross validated was limited to 4 due to limitations on the computing power of my machine.
+
+```{r modelFit, eval=FALSE}
+install.packages('e1071', dependencies=TRUE)
+library(e1071)
+set.seed(1234)
+
+registerDoParallel(cores = 4)
+
+modFit <- train(classe ~., data = training, method = "C5.0", prox = TRUE, trControl = trainControl("cv", number = 4, verboseIter = TRUE, allowParallel = TRUE))
+```
+
+The model is then used to predict values on the testing set called "val1".
+
+```{r predict, eval=FALSE}
+predictions <- predict(modFit, newdata = val1)
+head(predictions)
+```
+
+Calling on a confustion matrix showed me how well the model performed.
+
+```{r confustionMatrix, eval=FALSE}
+confusionMatrix(predictions, val1$classe)
+```
+
+## Test Results
+
+The confusion matrix demonstrated that the model worked very well with an accuracy of 100%  within a 95% confidence interval. The model also performed 100% accurately when predicting the classe values of a new test data set consisting of 20 test cases. 
+
+```{r answers, eval=FALSE}
+# create a vector of the predicted values on 20 test cases
+answers <- as.character(predict(modFit, newdata=testing))
+
+# write a function that takes each element of the 'answer' vector and creates a text file
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+# write the answers to 20 individual text files
+pml_write_files(answers)
+```
+
+Overall, the approach used was intended to get the best fitting model while keeping a light computational load on the CPU. The C5.0 and cross validation resampling methods worked perfectly for this data.  
+
